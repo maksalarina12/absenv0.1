@@ -8,8 +8,8 @@ on:
     # Selasa 10:45 WIB
     - cron: '45 3 * * 2'
 
-    # Rabu 14:00 WIB
-    - cron: '0 7 * * 3'
+    # Rabu 16:45 WIB (Diubah dari 14:00)
+    - cron: '45 9 * * 3'
 
     # Kamis 08:00 WIB
     - cron: '0 1 * * 4'
