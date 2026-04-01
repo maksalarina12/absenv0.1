@@ -2,49 +2,48 @@ name: Absensi Otomatis
 
 on:
   schedule:
-    # Senin 10:45 WIB
-    - cron: '45 3 * * 1'
-
-    # Selasa 10:45 WIB
+    # Selasa 10.45 WIB (Pengolahan Citra Digital)
     - cron: '45 3 * * 2'
 
-    # Rabu 16:45 WIB (Diubah dari 14:00)
-    - cron: '45 9 * * 3'
+    # Rabu 14.00 WIB (Technopreneurship, Proyek Technopreneurship)
+    - cron: '0 7 * * 3'
 
-    # Kamis 08:00 WIB
+    # Rabu 16.35 WIB (Metodologi Penelitian)
+    - cron: '35 9 * * 3'
+
+    # Kamis 08.00 WIB (Pattern Recognition, Visi Komputer)
     - cron: '0 1 * * 4'
 
-    # Kamis 14:00 WIB
+    # Kamis 14.00 WIB (Visi Komputer, Internet of Things, Praktikum IoT)
     - cron: '0 7 * * 4'
 
-    # Jumat 16:35 WIB
-    - cron: '35 9 * * 5'
-
-    # Sabtu 14:00 WIB
+    # Sabtu 14.00 WIB (Internet of Things, Praktikum IoT)
     - cron: '0 7 * * 6'
 
   workflow_dispatch:
 
 jobs:
-  run-absen:
+  absen:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 1. Ambil kode dari repository
+      - name: 1. Checkout repo
         uses: actions/checkout@v4
 
       - name: 2. Setup Chrome
         uses: browser-actions/setup-chrome@latest
 
-      - name: 3. Siapkan lingkungan Python
+      - name: 3. Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          
-      - name: 4. Install library dari requirement.txt
-        run: pip install -r requirement.txt
 
-      - name: 5. Jalankan skrip absen
+      - name: 4. Install dependencies
+        run: pip install selenium ddddocr python-dotenv
+
+      - name: 5. Jalankan absen.py
         env:
           NPM: ${{ secrets.NPM }}
           PASSWORD: ${{ secrets.PASSWORD }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python -u absen.py

@@ -1,108 +1,170 @@
+import json
+import os
+import sys
+import time
+import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from dotenv import load_dotenv
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from dotenv import load_dotenv
-import os, time, datetime
-from zoneinfo import ZoneInfo
+import ddddocr
+
+# ── Konfigurasi ──────────────────────────────────────────────────────────────
 
 load_dotenv()
-USERNAME = os.getenv("NPM")
-PASSWORD = os.getenv("PASSWORD")
 
-options = Options()
-options.add_argument("--headless") 
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
+NPM        = os.getenv("NPM")
+PASSWORD   = os.getenv("PASSWORD")
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
+BASE_URL   = "https://simkuliah.usk.ac.id"
+CACHE_FILE = Path("jadwal_cache.json")
+WIB        = ZoneInfo("Asia/Jakarta")
 
-options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-driver = webdriver.Chrome(options=options)
+# ── Helper: Notifikasi ────────────────────────────────────────────────────────
 
-try:
-    now = datetime.datetime.now(ZoneInfo("Asia/Jakarta"))
-    if now.weekday() >= 5 or not (8 <= now.hour < 21):
-        print(" Di luar jam kuliah. Tidak mencoba absen.")
+def kirim_notif(tipe: str, judul: str, pesan: str):
+    """Kirim push notification via ntfy.sh. tipe: sukses | info | error"""
+    if not NTFY_TOPIC:
+        return
+    topic_map = {
+        "sukses": f"{NTFY_TOPIC}-sukses",
+        "info":   f"{NTFY_TOPIC}-info",
+        "error":  f"{NTFY_TOPIC}-error",
+    }
+    url = f"ntfy.sh/{topic_map.get(tipe, NTFY_TOPIC)}"
+    os.system(f'curl -s -H "Title: {judul}" -d "{pesan}" {url}')
+
+# ── Helper: Jadwal Cache ──────────────────────────────────────────────────────
+
+def get_jadwal_hari_ini() -> list[dict]:
+    """Baca jadwal_cache.json dan filter jadwal hari ini."""
+    if not CACHE_FILE.exists():
+        print("⚠️  jadwal_cache.json tidak ditemukan — absen akan tetap dicoba.")
+        return []
+
+    with open(CACHE_FILE, "r") as f:
+        data = json.load(f)
+
+    hari_ini = datetime.datetime.now(WIB).date()
+    hasil = []
+    for mk in data.get("jadwal", []):
+        try:
+            tanggal = datetime.date.fromisoformat(mk["tanggal"])
+            if tanggal == hari_ini:
+                hasil.append(mk)
+        except Exception:
+            pass
+    return hasil
+
+# ── Helper: Browser ───────────────────────────────────────────────────────────
+
+def buat_driver() -> webdriver.Chrome:
+    options = Options()
+    options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    )
+    return webdriver.Chrome(options=options)
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+def main():
+    now = datetime.datetime.now(WIB)
+    print(f"🕐 Waktu: {now.strftime('%A, %d-%m-%Y %H:%M')} WIB")
+
+    # Validasi kredensial
+    if not NPM or not PASSWORD:
+        print("❌ NPM atau PASSWORD tidak ditemukan di environment.")
+        sys.exit(1)
+
+    # Cek jadwal hari ini dari cache
+    jadwal_hari_ini = get_jadwal_hari_ini()
+    if jadwal_hari_ini:
+        print(f"📚 Jadwal hari ini ({len(jadwal_hari_ini)} sesi):")
+        for mk in jadwal_hari_ini:
+            print(f"   - {mk['nama_mk']} | {mk['jam']} | {mk['ruang']}")
     else:
-        driver.get("https://simkuliah.usk.ac.id/")
+        print("ℹ️  Tidak ada jadwal hari ini di cache — tetap mencoba absen.")
+
+    driver = buat_driver()
+    ocr = ddddocr.DdddOcr(show_ad=False)
+
+    try:
+        # Login
+        print("\n🔐 Memulai login...")
+        driver.get(BASE_URL)
         wait = WebDriverWait(driver, 10)
 
-        wait.until(EC.presence_of_element_located((By.NAME, "username"))).send_keys(USERNAME)
+        wait.until(EC.presence_of_element_located((By.NAME, "username"))).send_keys(NPM)
         driver.find_element(By.NAME, "password").send_keys(PASSWORD)
-        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[type="submit"]'))).click()
 
-        time.sleep(2)  
-        print(" URL setelah login:", driver.current_url)
+        # Solve CAPTCHA
+        captcha_img = wait.until(EC.presence_of_element_located((By.ID, "captcha-img")))
+        captcha_text = ocr.classification(captcha_img.screenshot_as_png).strip().replace(" ", "")
+        print(f"🔑 CAPTCHA terbaca: {captcha_text}")
+
+        driver.find_element(By.NAME, "captcha_answer").send_keys(captcha_text)
+        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[type="submit"]'))).click()
+        time.sleep(3)
 
         if "login" in driver.current_url.lower():
-            print(" Gagal login. Cek username/password atau CAPTCHA.")
-            driver.save_screenshot("login_failed.png")
-            driver.quit()
-            exit()
+            print("❌ Login gagal! CAPTCHA mungkin salah terbaca.")
+            kirim_notif("error", "Absen ERROR", "Login gagal, CAPTCHA salah terbaca.")
+            sys.exit(1)
 
-        driver.get("https://simkuliah.usk.ac.id/index.php/absensi")
+        print("✅ Login berhasil!")
+
+        # Absen
+        driver.get(f"{BASE_URL}/index.php/absensi")
         time.sleep(2)
 
-        absen_dilakukan = False
-        for i in range(2): 
+        absen_berhasil = 0
+        for i in range(2):
             try:
-                
-                absen_button = WebDriverWait(driver, 5).until(
+                absen_btn = WebDriverWait(driver, 5).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, ".btn.btn-success"))
                 )
-                
-                print(f"--- Memproses Tombol Absen (Percobaan #{i+1}) ---")
-                print("HTML tombol:", absen_button.get_attribute("outerHTML"))
-                
-                
-                driver.execute_script("arguments[0].click();", absen_button)
-                print("Tombol absen diklik.")
+                driver.execute_script("arguments[0].click();", absen_btn)
                 time.sleep(2)
-                driver.save_screenshot(f"after_absen_click_{i+1}.png")
 
-                
-                konfirmasi_button = WebDriverWait(driver, 10).until(
+                konfirmasi = WebDriverWait(driver, 10).until(
                     EC.element_to_be_clickable((By.CLASS_NAME, "confirm"))
                 )
-                driver.execute_script("arguments[0].click();", konfirmasi_button)
-                print("Tombol konfirmasi diklik.")
-                time.sleep(2)
-                driver.save_screenshot(f"after_konfirmasi_click_{i+1}.png")
-                
-                print(f"--- Absen #{i+1} Selesai ---")
-                absen_dilakukan = True
-                time.sleep(3) 
+                driver.execute_script("arguments[0].click();", konfirmasi)
+                time.sleep(3)
+
+                absen_berhasil += 1
+                print(f"✅ Absen #{absen_berhasil} berhasil!")
 
             except Exception:
-                
-                print(f"Tidak ada lagi tombol absen yang ditemukan pada percobaan #{i+1}.")
                 break
-        
-        if absen_dilakukan:
-            print("Proses absensi selesai. Harap cek manual apakah absensi benar-benar tercatat.")
-            
-            # Ganti topik ntfy.sh/akbar-permana-absen-sukses dengan topik ntfy kalian.
-            os.system('curl -H "Title: Absen Berhasil" -d "Cihuyy, bot telah melakukan absensi." ntfy.sh/akbar-permana-absen-sukses')
-            
-            
+
+        if absen_berhasil == 0:
+            print("ℹ️  Tidak ada tombol absen yang tersedia.")
+            kirim_notif("info", "Tidak Ada Jadwal", "Bot berjalan tapi tidak ada tombol absen.")
         else:
-            print("ℹ Tidak ada tombol absen yang bisa diklik. Mungkin tidak ada jadwal.")
-            
-            
-            # Ganti topik ntfy.sh/akbar-permana-absen-info dengan topik ntfy kalian.
-            os.system('curl -H "Title: Tidak Ada Jadwal" -d "Bot berjalan, tapi tidak ada jadwal absen yang tersedia." ntfy.sh/akbar-permana-absen-info')
-            
+            pesan = f"{absen_berhasil} absensi berhasil dilakukan."
+            print(f"\n🎉 {pesan}")
+            kirim_notif("sukses", "Absen Berhasil", pesan)
 
-except Exception as e:
-    print(" Terjadi error:", e)
-    driver.save_screenshot("error.png")
-    print(" Screenshot error disimpan sebagai 'error.png'")
-    print(" Potongan halaman:\n", driver.page_source[:1000])
-    
-    # Ganti topik ntfy.sh/akbar-permana-absen-error dengan topik ntfy kalian.
-    os.system('curl -H "Title:  Absen ERROR" -d "Terjadi error saat menjalankan bot. Cek log di GitHub Actions." ntfy.sh/akbar-permana-absen-error')
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        kirim_notif("error", "Absen ERROR", f"Error: {e}")
+        sys.exit(1)
 
-finally:
-    driver.quit()
+    finally:
+        driver.quit()
 
+
+if __name__ == "__main__":
+    main()
