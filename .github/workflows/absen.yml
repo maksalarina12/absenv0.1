@@ -2,24 +2,30 @@ name: Absensi Otomatis
 
 on:
   schedule:
-    # Selasa 10.45 WIB (Pengolahan Citra Digital)
-    - cron: '45 3 * * 2'
+# Senin 14.00 WIB (Perancangan Infrastruktur Jaringan)
+    - cron: '0 7 * * 1'
 
-    # Rabu 14.00 WIB (Technopreneurship, Proyek Technopreneurship)
+    # Rabu 10.45 WIB (Pemrograman dan Simulasi Jaringan)
+    - cron: '45 3 * * 3'
+
+    # Rabu 14.00 WIB (Technopreneurship)
     - cron: '0 7 * * 3'
+
+    # Rabu 14.55 WIB (Proyek Technopreneurship)
+    - cron: '55 7 * * 3'
 
     # Rabu 16.35 WIB (Metodologi Penelitian)
     - cron: '35 9 * * 3'
 
-    # Kamis 08.00 WIB (Pattern Recognition, Visi Komputer)
+    # Kamis 08.00 WIB (Pattern Recognition and Machine Learning)
     - cron: '0 1 * * 4'
 
-    # Kamis 14.00 WIB (Visi Komputer, Internet of Things, Praktikum IoT)
-    - cron: '0 7 * * 4'
+    # Kamis 10.45 WIB (Komputasi Berkinerja Tinggi)
+    - cron: '45 3 * * 4'
 
     # Sabtu 14.00 WIB (Internet of Things, Praktikum IoT)
-    - cron: '0 7 * * 6'
-
+    - cron: '0 7 * * 6'  
+    
   workflow_dispatch:
 
 jobs:
